@@ -41,7 +41,7 @@ A RESTful API for managing a product catalog, built with **FastAPI** and **SQLAl
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/your-username/repository-name.git
+   git clone https://github.com/lucasmachi/product-catalog-api.git
    cd repository-name
    ```
 
