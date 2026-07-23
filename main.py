@@ -9,8 +9,8 @@ from sqlalchemy.orm import sessionmaker, Session
 
 
 app = FastAPI(
-    title="API Tarefas",
-    description="API para gerenciar tarefas",
+    title="Products API",
+    description="API for managing products",
     version="1.0.0",
     contact={
         "name": "Lucas Machi",
@@ -18,120 +18,118 @@ app = FastAPI(
     }
 )
 
-MEU_USUARIO = "admin"
-MINHA_SENHA =  "admin"
-DATABASE_URL = "sqlite:///./tarefas.db"
+MY_USERNAME = "admin"
+MY_PASSWORD = "admin"
+DATABASE_URL = "sqlite:///./products.db"
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 security = HTTPBasic()
 Base = declarative_base()
 
-class TarefasDB(Base):
-    __tablename__ = "tabela_tarefas"
-    id = Column(Integer, index = True, primary_key=True)
-    nome = Column(String, index = True)
-    descricao = Column(String, index = True)
-    concluida = Column(Boolean, default = False)
+class ProductDB(Base):
+    __tablename__ = "products_table"
+    id = Column(Integer, index=True, primary_key=True)
+    name = Column(String, index=True)
+    description = Column(String, index=True)
+    available = Column(Boolean, default=True)
 
-class Tarefa(BaseModel):
-    nome: str
-    descricao: str
+class Product(BaseModel):
+    name: str
+    description: str
 
 Base.metadata.create_all(bind=engine)
 
-def sessao_db():
+def get_db_session():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
 
-def autenticar_usuario(credentials: HTTPBasicCredentials = Depends(security)):
-    is_user_correct = secrets.compare_digest(credentials.username, MEU_USUARIO)
-    is_password_correct = secrets.compare_digest(credentials.password, MINHA_SENHA)
-    
+def authenticate_user(credentials: HTTPBasicCredentials = Depends(security)):
+    is_user_correct = secrets.compare_digest(credentials.username, MY_USERNAME)
+    is_password_correct = secrets.compare_digest(credentials.password, MY_PASSWORD)
+
     if not (is_user_correct and is_password_correct):
-        raise HTTPException (
+        raise HTTPException(
             status_code=401,
-            detail="Usuário ou senha inválidos",
+            detail="Invalid username or password",
             headers={"WWW-Authenticate": "Basic"}
         )
 
-@app.post("/adiciona")
-def adicionar_tarefa(tarefa: Tarefa, db: Session = Depends(sessao_db), credentials: HTTPBasicCredentials = Depends(autenticar_usuario)):
-    verifica_tarefa_existe = db.query(TarefasDB).filter(TarefasDB.nome == tarefa.nome, TarefasDB.descricao == tarefa.descricao).first()
-    if verifica_tarefa_existe:
-        raise HTTPException(status_code=400, detail="Essa tarefa já existe no banco de dados!")
-    
-    nova_tarefa = TarefasDB(nome = tarefa.nome, descricao = tarefa.descricao, concluida = False)
-    db.add(nova_tarefa)
+@app.post("/add")
+def add_product(product: Product, db: Session = Depends(get_db_session), credentials: HTTPBasicCredentials = Depends(authenticate_user)):
+    check_product_exists = db.query(ProductDB).filter(ProductDB.name == product.name, ProductDB.description == product.description).first()
+    if check_product_exists:
+        raise HTTPException(status_code=400, detail="This product already exists in the database!")
+
+    new_product = ProductDB(name=product.name, description=product.description, available=True)
+    db.add(new_product)
     db.commit()
-    db.refresh(nova_tarefa)
-    return {"mensagem": "Tarefa adicionada com sucesso", "tarefa": nova_tarefa}
+    db.refresh(new_product)
+    return {"message": "Product added successfully", "product": new_product}
 
 
-@app.get("/tarefas")
-def listar_tarefa(
+@app.get("/products")
+def list_products(
     page: int = 1,
     limit: int = 10,
-    db: Session = Depends(sessao_db),
-    credentials: HTTPBasicCredentials = Depends(autenticar_usuario)
+    db: Session = Depends(get_db_session),
+    credentials: HTTPBasicCredentials = Depends(authenticate_user)
 ):
     if page < 1 or limit < 1:
-        raise HTTPException(status_code=400, detail="Página ou limite não podem ter valores menores que 1")
-    
-    tarefas_listadas = db.query(TarefasDB).offset((page - 1) * limit).limit(limit).all()
+        raise HTTPException(status_code=400, detail="Page or limit cannot be less than 1")
 
-    if not tarefas_listadas:
-        return {"message": "Não existe nenhuma tarefa"}
+    listed_products = db.query(ProductDB).offset((page - 1) * limit).limit(limit).all()
 
-    total_tarefas= db.query(TarefasDB).count()
+    if not listed_products:
+        return {"message": "There are no products"}
+
+    total_products = db.query(ProductDB).count()
 
     return {
         "page": page,
         "limit": limit,
-        "total": total_tarefas,
-        "tarefas": [{"id": tarefa.id, "nome": tarefa.nome, "descricao": tarefa.descricao} for tarefa in tarefas_listadas]
+        "total": total_products,
+        "products": [{"id": product.id, "name": product.name, "description": product.description} for product in listed_products]
     }
 
 
-@app.put("/atualiza/{id_tarefa}")
-def atualiza_tarefa(id_tarefa: int, tarefa: Tarefa, db: Session = Depends(sessao_db), credentials: HTTPBasicCredentials = Depends(autenticar_usuario)):
-    tarefa_atualizada = db.query(TarefasDB).filter(TarefasDB.id == id_tarefa).first()
-    if not tarefa_atualizada:
-        raise HTTPException(status_code=404, detail="Essa tarefa não existe no banco de dados!")
+@app.put("/update/{product_id}")
+def update_product(product_id: int, product: Product, db: Session = Depends(get_db_session), credentials: HTTPBasicCredentials = Depends(authenticate_user)):
+    updated_product = db.query(ProductDB).filter(ProductDB.id == product_id).first()
+    if not updated_product:
+        raise HTTPException(status_code=404, detail="This product does not exist in the database!")
 
-    tarefa_atualizada.nome = tarefa.nome
-    tarefa_atualizada.descricao = tarefa.descricao
+    updated_product.name = product.name
+    updated_product.description = product.description
     db.commit()
-    db.refresh(tarefa_atualizada)
+    db.refresh(updated_product)
 
+    return {"message": "Product updated successfully!"}
 
-    return {"message": "Livro atualizado com sucesso!"}
+# Route just to mark the product as unavailable
+@app.patch("/update/{product_id}/unavailable")
+def mark_unavailable(product_id: int, db: Session = Depends(get_db_session), credentials: HTTPBasicCredentials = Depends(authenticate_user)):
+    product_stock_status = db.query(ProductDB).filter(ProductDB.id == product_id).first()
+    if not product_stock_status:
+        raise HTTPException(status_code=404, detail="This product does not exist in the database!")
 
-#Rota só pra marcar como concluida
-@app.patch("/atualiza/{id_tarefa}/concluir")
-def marcar_concluida(id_tarefa: int, db: Session = Depends(sessao_db), credentials: HTTPBasicCredentials = Depends(autenticar_usuario)):
-    tarefa_concluida = db.query(TarefasDB).filter(TarefasDB.id == id_tarefa).first()
-    if not tarefa_concluida:
-        raise HTTPException(status_code=404, detail="Essa tarefa não existe no banco de dados!")
-
-    tarefa_concluida.concluida = True
+    product_stock_status.available = False
     db.commit()
-    db.refresh(tarefa_concluida)
+    db.refresh(product_stock_status)
 
-    return {"mensagem": "Tarefa marcada como concluída", "tarefa": tarefa_concluida}
+    return {"message": "Product marked as unavailable", "product": product_stock_status}
 
 
-@app.delete("/deleta/{id_tarefa}")
-def deleta_tarefa(id_tarefa: int, db: Session = Depends(sessao_db), credentials: HTTPBasicCredentials = Depends(autenticar_usuario)):
-    tarefa_deletada = db.query(TarefasDB).filter(TarefasDB.id == id_tarefa).first()
-    if not tarefa_deletada:
-        raise HTTPException(status_code=404, detail="Essa tarefa não existe no banco de dados!")
+@app.delete("/delete/{product_id}")
+def delete_product(product_id: int, db: Session = Depends(get_db_session), credentials: HTTPBasicCredentials = Depends(authenticate_user)):
+    deleted_product = db.query(ProductDB).filter(ProductDB.id == product_id).first()
+    if not deleted_product:
+        raise HTTPException(status_code=404, detail="This product does not exist in the database!")
 
-    db.delete(tarefa_deletada)
+    db.delete(deleted_product)
     db.commit()
 
-
-    return {"message": "Tarefa deletada com sucesso!"}
+    return {"message": "Product deleted successfully!"}
